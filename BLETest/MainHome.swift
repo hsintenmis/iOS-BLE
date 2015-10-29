@@ -21,9 +21,14 @@ class MainHome: UIViewController, CBCentralManagerDelegate, CBPeripheralDelegate
     @IBOutlet weak var labMsg1: UILabel!
     @IBOutlet weak var txtMsg: UITextView!
     
+    var activeTimer:NSTimer!
+    
     var centralManager:CBCentralManager!
     var blueToothReady = false
     var connectingPeripheral: CBPeripheral!
+    
+    var actBTService: CBService!
+    var actBTCharact: CBCharacteristic!
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -47,12 +52,14 @@ class MainHome: UIViewController, CBCentralManagerDelegate, CBPeripheralDelegate
         
         // TODO 需要設定搜尋時間
         
-        // 找到指定裝置名稱/addr
+        // 找到指定裝置 名稱 or addr
         if (peripheral.name == D_BTDEVNAME) {
             self.connectingPeripheral = peripheral
             self.centralManager.stopScan()
             self.centralManager.connectPeripheral(peripheral, options: nil)
         }
+        
+        //NSTimer(timeInterval: 2.0, target: self, selector: selector(scanTimeout:), userInfo: nil, repeats: false)
     }
     
     /**
@@ -65,8 +72,11 @@ class MainHome: UIViewController, CBCentralManagerDelegate, CBPeripheralDelegate
         print("Connected BT device")
         txtMsg.text! += "Connected BT device\n"
     }
-    
-    func centralManagerDidUpdateState(central: CBCentralManager) { //BLE status
+
+    /**
+    * 目前 BLE center manage statu
+    */
+    func centralManagerDidUpdateState(central: CBCentralManager) {
         var msg = ""
         switch (central.state) {
         case .PoweredOff:
@@ -105,76 +115,82 @@ class MainHome: UIViewController, CBCentralManagerDelegate, CBPeripheralDelegate
     func peripheral(peripheral: CBPeripheral, didDiscoverServices error: NSError?)
     {
         // 指定的 Service channel 查詢 character code
-        let mService: CBService = peripheral.services![0]
+        self.actBTService = peripheral.services![0]
         
-        txtMsg.text! += "Service: \(mService.UUID)\n"
-        peripheral.discoverCharacteristics([UID_CHAR], forService: mService)
-        
-        /**
-        let servicePeripherals: [CBService] = peripheral.services!
-        
-        if (servicePeripherals.count > 0) {
-            var strMsg: String = "";
-            
-            for servicePeripheral in servicePeripherals {
-                print("Service: \(servicePeripheral.UUID)")
-                strMsg += "Service: \(servicePeripheral.UUID)\n"
-                peripheral.discoverCharacteristics(nil, forService: servicePeripheral)
-            }
-            
-            txtMsg.text = strMsg
-        }
-        */
-
+        // Discover 指定的 charact 執行測試連接
+        txtMsg.text! += "Service: \(self.actBTService.UUID)\n"
+        print("Service: \(self.actBTService.UUID)")
+        peripheral.discoverCharacteristics([UID_CHAR], forService: self.actBTService)
     }
-    
-    /*
-    func peripheral(peripheral: CBPeripheral, didDiscoverDescriptorsForCharacteristic characteristic: CBCharacteristic, error: NSError?) {
-        
-    }
-    */
 
     /**
     * 查詢指定 Service channel 的 charccter code
     */
     func peripheral(peripheral: CBPeripheral, didDiscoverCharacteristicsForService service: CBService, error: NSError?) {
-
-        let mChart: CBCharacteristic = service.characteristics![0]
-        //connectingPeripheral.discoverDescriptorsForCharacteristic(mChart)
+        self.actBTCharact = service.characteristics![0]
+        print("Characteristic: \(self.actBTCharact)")
         
-        // 藍牙 BLE 必填標準參數，關閉或打開通知(Notify)的UUID, 藍牙規格固定值
+        // 直接執行關閉或打開通知(Notify)的UUID, 藍牙規格固定值
+        peripheral.setNotifyValue(true, forCharacteristic: self.actBTCharact)
         
+        //peripheral.readValueForCharacteristic(self.actBTCharact)
         
+        //peripheral.discoverDescriptorsForCharacteristic(self.actBTCharact)
         
-        peripheral.setNotifyValue(true, forCharacteristic: mChart)
-        print("Characteristic: \(mChart)")
-        peripheral.readValueForCharacteristic(mChart)
+        print("SetNotify: \(self.actBTCharact)")
+    }
+    
+    /**
+    * NotificationStateForCharacteristic 更新
+    */
+    func peripheral(peripheral: CBPeripheral, didUpdateNotificationStateForCharacteristic characteristic: CBCharacteristic, error: NSError?) {
+        
+        print("didUpdata Notify: \(characteristic)")
+        
+        connectingPeripheral.writeValue( NSData(bytes: [0x01] as [UInt8], length: 1), forCharacteristic: self.actBTCharact, type: CBCharacteristicWriteType.WithResponse)
+    }
+    
+    /**
+    * Discover characteristics 的 DiscoverDescriptors
+    * 主要執行 BT 的 關閉或打開通知(Notify)
+    */
+    func peripheral(peripheral: CBPeripheral, didDiscoverDescriptorsForCharacteristic characteristic: CBCharacteristic, error: NSError?) {
+        
+        print("Descriptor: \(characteristic.descriptors)")
+        
+        let mDisp: CBDescriptor = characteristic.descriptors![0]
+        mDisp.setValue(1, forKey: "value")
+        mDisp.setValue(UID_NOTIFY, forKey: "UUID")
+    
+        print("disp0: \(mDisp)")
+        
+        //let mNSData = NSData()
+        let mNSData = NSData(bytes: [0x01] as [UInt8], length: 1)
+        peripheral.writeValue(mNSData, forDescriptor: mDisp)
+       
+        peripheral.readValueForCharacteristic(self.actBTCharact)
         
         /*
-        let charactericsArr: [CBCharacteristic] = service.characteristics!
-
-        if (charactericsArr.count > 0) {
-            var strMsg: String = "";
-            
-            for charactericsx in charactericsArr{
-                peripheral.setNotifyValue(true, forCharacteristic: charactericsx)
-                print("Characteristic: \(charactericsx)")
-                strMsg += "Characteristic: \(charactericsx)\n"
-                
-                peripheral.readValueForCharacteristic(charactericsx)
-            }
-            
-            txtMsg.text = strMsg
-        }
+        var parameter = NSInteger(1)
+        let mNSData = NSData(bytes: &parameter, length: 1)
+        peripheral.writeValue(mNSData, forDescriptor: mDisp)
         */
     }
     
+    /**
+    * BT 有資料更新，傳送到本機 BT 顯示
+    */
     func peripheral(peripheral: CBPeripheral, didUpdateValueForCharacteristic characteristic: CBCharacteristic, error: NSError?) {
         
-        if var data :NSData = characteristic.value {
+        if (characteristic.value?.length > 0) {
+            //print("from BT value: \(characteristic.value!)")
+
+            // 將回傳資料轉為 [Byte] = [UInt8]
+            let data = characteristic.value!
+            var values = [UInt8](count:data.length, repeatedValue:0)
+            data.getBytes(&values, length:data.length)
             
-            txtMsg.text! += "Data: \(characteristic.value)\n Notifying: \(characteristic.isNotifying)\n"
-            print("Data: \(characteristic.value)\n Notifying: \(characteristic.isNotifying)")
+            print(values)
         }
         
     }
@@ -184,19 +200,32 @@ class MainHome: UIViewController, CBCentralManagerDelegate, CBPeripheralDelegate
     }
     
     @IBAction func actDisconn(sender: UIButton) {
+        if activeTimer != nil {
+            activeTimer.invalidate()
+            activeTimer = nil
+        }
+        
+        centralManager.cancelPeripheralConnection(connectingPeripheral)
+        connectingPeripheral = nil
+        actBTCharact = nil
+        actBTService = nil
+        
         print("BT disconnect...")
     }
     
     @IBAction func actBtnA(sender: UIButton) {
+        let mNSData = NSData(bytes: [UInt8]("A".utf8), length: 1)
+        connectingPeripheral.writeValue(mNSData, forCharacteristic: self.actBTCharact, type: CBCharacteristicWriteType.WithoutResponse)
     }
     
     @IBAction func actBtnB(sender: UIButton) {
+        let mNSData = NSData(bytes: [UInt8]("B".utf8), length: 1)
+        connectingPeripheral.writeValue(mNSData, forCharacteristic: self.actBTCharact, type: CBCharacteristicWriteType.WithoutResponse)
     }
     
     @IBAction func actBtnC(sender: UIButton) {
-        let data: NSData = "01:00".dataUsingEncoding(NSUTF8StringEncoding)!
-        connectingPeripheral.writeValue(data, forCharacteristic: charactericsx, type: CBCharacteristicWriteType.WithResponse)
-        //output("Characteristic", data: charactericsx)
+        let mNSData = NSData(bytes: [UInt8]("C".utf8), length: 1)
+        connectingPeripheral.writeValue(mNSData, forCharacteristic: self.actBTCharact, type: CBCharacteristicWriteType.WithoutResponse)
     }
 
     override func didReceiveMemoryWarning() {
